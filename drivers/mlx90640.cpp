@@ -29,6 +29,7 @@
 #include <cstdio>
 #include <thread>
 #include <stdexcept>
+#include <interfaces/delays.h>
 #include <interfaces/endianness.h>
 
 using namespace std;
@@ -50,7 +51,32 @@ MLX90640::MLX90640(I2C1Master *i2c, unsigned char devAddr)
 {
     const unsigned int eepromSize=832;
     unsigned short eeprom[eepromSize]; // Heavy object! ~1.7 KByte
-    if(read(0x2400,eepromSize,eeprom)==false || MLX90640_ExtractParameters(eeprom,&params))
+    unsigned short cksum = 0;
+    bool stop = false;
+    int tries = 0;
+    do {
+        tries++;
+        this_thread::sleep_for(std::chrono::milliseconds(80));
+        if(read(0x2400,eepromSize,eeprom)==false)
+            throw runtime_error("I2C failure while reading EEPROM");
+        iprintf("EEPROM data read attempt %d:\n", tries);
+        unsigned short new_cksum = 0;
+        for (unsigned int j=0; j<eepromSize; j++) {
+            iprintf("%04x ", eeprom[j]);
+            if ((j+1) % 8 == 0 || (j+1) == eepromSize)
+                iprintf("\n");
+            new_cksum = new_cksum ^ eeprom[j];
+        }
+        iprintf("new cksum = %04x, old cksum = %04x\n", new_cksum, cksum);
+        if (new_cksum == cksum) {
+            stop = true;
+        } else {
+            cksum = new_cksum;
+        }
+    } while (!stop && tries < 10);
+    iprintf("ok we have read enough I'm tired\n");
+    
+    if (MLX90640_ExtractParameters(eeprom,&params))
         throw runtime_error("EEPROM failure");
     if(setRefresh(MLX90640Refresh::R1)==false)
         throw runtime_error("I2C failure");
